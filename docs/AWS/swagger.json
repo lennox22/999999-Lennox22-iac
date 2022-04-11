@@ -1,0 +1,38 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "version": "2019-02-13T23:04:50Z",
+    "title": "YOURNAME"
+  },
+  "host": "99999-YOURNAME",
+  "schemes": [
+    "https"
+  ],
+  "paths": {
+    "/sendtosqs": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "200 response"
+          }
+        },
+        "x-amazon-apigateway-integration": {
+          "credentials": "arn:aws:iam::418023852230:role/test-00000-placeholder-invoke-role-us-east-2",
+          "uri": "arn:aws:apigateway:us-east-2:sqs:path/418023852230/99999-YOURNAME",
+          "responses": {
+            "default": {
+              "statusCode": "200"
+            }
+          },
+          "requestParameters": {
+            "integration.request.querystring.MessageBody": "method.request.body",
+            "integration.request.querystring.Action": "'SendMessage'"
+          },
+          "passthroughBehavior": "when_no_match",
+          "httpMethod": "POST",
+          "type": "aws"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+platform: 'linux'
+image: 'awscli'
+
+env:
+  test-aws:
+    ASPNETCORE_ENVIRONMENT: 'test'
+    HAL_ECS_TASK: 'test-999999-PLACHOLDER'                              # Fill out with environment-coreid-applicationname
+    HAL_ECS_CLUSTER: 'test-ecscluster-${AWS_ACCOUNT}-$HAL_CONTEXT'      # Only need to fill out if using custom cluster name (with prefix)
+    HAL_BLUE_GREEN: 'false'                                             # Blue/Green deployment, true or false?
+
+  beta-aws:
+    HAL_ECS_TASK: 'beta-999999-PLACHOLDER'                              # Fill out with environment-coreid-applicationname
+    HAL_ECS_CLUSTER: 'beta-ecscluster-${AWS_ACCOUNT}-$HAL_CONTEXT'      # Only need to fill out if using custom cluster name (with prefix)
+    HAL_BLUE_GREEN: 'false'                                             # Blue/Green deployment, true or false?
+
+  prod-aws:
+    HAL_ECS_TASK: 'prod-999999-PLACHOLDER'                              # Fill out with environment-corei-applicationname
+    HAL_ECS_CLUSTER: 'prod-ecscluster-${AWS_ACCOUNT}-$HAL_CONTEXT'      # Only need to fill out if using custom cluster name (with prefix)
+    HAL_BLUE_GREEN: 'false'                                             # Blue/Green deployment, true or false?
+
+deploy:
+
+- sed -i -e "s~\${TASK_ENVIRONMENT}~$ASPNETCORE_ENVIRONMENT~; s~\${TASK_NAME}~$HAL_ECS_TASK~; s~\${ECR_URL}~${AWS_ACCOUNT}.dkr.ecr.$HAL_CONTEXT.amazonaws.com/$HAL_ECS_TASK:${HAL_COMMIT}~; s~\${TASK_REGION}~$HAL_CONTEXT~; s~\${TASK_ROLE_ARN}~arn:aws:iam::${AWS_ACCOUNT}:role/QL/ECS/role-$HAL_ECS_TASK~; s~\${EXECUTION_ROLE_ARN}~arn:aws:iam::${AWS_ACCOUNT}:role/QL/ECS/role-$HAL_ECS_TASK~" task.json
+- |
+    if [ "$HAL_BLUE_GREEN" == "false" ] ; then
+      aws ecs register-task-definition --cli-input-json file://task.json --region $HAL_CONTEXT
+      aws ecs update-service --cluster $HAL_ECS_CLUSTER --service $HAL_ECS_TASK --task-definition $HAL_ECS_TASK --region $HAL_CONTEXT
+    else
+      pip install awscli --upgrade
+      sed -i -e "s~\${TASK_NAME}~$HAL_ECS_TASK~" codedeploy.json
+      aws ecs deploy --service $HAL_ECS_TASK --task-definition task.json --cluster $HAL_ECS_CLUSTER --codedeploy-application $HAL_ECS_TASK --codedeploy-deployment-group $HAL_ECS_TASK --codedeploy-appspec codedeploy.json --region $HAL_CONTEXT
+    fi

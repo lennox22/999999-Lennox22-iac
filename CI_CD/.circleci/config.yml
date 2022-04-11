@@ -1,0 +1,135 @@
+attach_workspace: &attach_workspace
+    attach_workspace:
+        at: '.'
+
+persist_workspace: &persist_workspace
+    persist_to_workspace:
+        root: '.'
+        paths: [ '.' ]
+
+persist_hal_build_id_to_workspace: &persist_hal_build_id_to_workspace
+    persist_to_workspace:
+        root: '.'
+        paths: [ '.hal_build_id' ]
+
+enterprise_setup: &enterprise_setup
+    run:
+        name: 'Prepare Enterprise Setup'
+        command: 'curl -sL https://tools.circleci.foc.zone/install-certs | bash -'
+
+deploy_nonprod_job: &deploy_nonprod_job
+    working_directory: '~/project'
+    docker: [ {image: 'qldockerdtr.rockfin.com/circleci/hal-integration:hal-publisher'} ]
+    steps:
+        - *attach_workspace
+        - run: 'deploy-to-hal'
+
+deploy_prod_job: &deploy_prod_job
+    working_directory: '~/project'
+    docker: [ {image: 'qldockerdtr.rockfin.com/circleci/hal-integration:hal-publisher'} ]
+    steps:
+        - *attach_workspace
+        - run: 'deploy-to-hal-passive-only'
+
+version: 2
+
+jobs:
+    build:
+        working_directory: '~/project'
+        docker:
+            - image: jbilliau/k8-builder:1.0
+        environment:
+            CIRCLE_TEST_ECR_URL: 418023852230.dkr.ecr.us-east-2.amazonaws.com/test-999999-placeholder
+            CIRCLE_BETA_ECR_URL: 418023852230.dkr.ecr.us-east-2.amazonaws.com/beta-999999-placeholder
+            CIRCLE_AWS_REGION: us-east-2
+        steps:
+            - checkout
+            - setup_remote_docker
+            - *enterprise_setup
+            - run:
+                name: Build Docker Container
+                command: |
+                    docker build -t docker_image ./workshop_materials/Docker/sample-container/
+            - deploy:
+                name: Push Docker Image to Test
+                command: |
+                    # Login to ECR - Tag and push docker image to TEST ECR repo
+                    aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY_NP
+                    aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID_NP
+                    eval $(aws ecr get-login --region $CIRCLE_AWS_REGION --no-include-email)
+                    docker tag docker_image:latest $CIRCLE_TEST_ECR_URL:$CIRCLE_SHA1
+                    docker push $CIRCLE_TEST_ECR_URL:$CIRCLE_SHA1
+            - deploy:
+                name: Push Docker Image to Beta
+                command: |
+                    # Login to ECR - Tag and push docker image to BETA ECR repo
+                    aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY_NP
+                    aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID_NP
+                    eval $(aws ecr get-login --region $CIRCLE_AWS_REGION --no-include-email)
+                    docker tag docker_image:latest $CIRCLE_BETA_ECR_URL:$CIRCLE_SHA1
+                    docker push $CIRCLE_BETA_ECR_URL:$CIRCLE_SHA1
+            - *persist_workspace
+
+    # sonar_scanner:
+    #     docker:
+    #         - image: qldockerdtr.rockfin.com/jcherry/dotnet:2.1-sdk-openjdk
+    #     working_directory: ~/app/src
+    #     environment:
+    #         - SONAR_URL: https://sonarqube.rockfin.com
+    #         - CORE_ID: 202104
+    #     steps:
+    #         - *attach_workspace
+    #         - run
+    #             name: Download sonar tool
+    #             command: dotnet tool install dotnet-sonarscanner --tool-path ~/tools
+    #         - run:
+    #             name: Run sonar scanner
+    #             command: |
+    #                 echo "Using Branch $CIRCLE_BRANCH"
+    #                 ~/tools/dotnet-sonarscanner begin /k:"QL.$CORE_ID" /n:"$CIRCLE_PROJECT_REPONAME" /v:"$CIRCLE_SHA1" /d:sonar.host.url="$SONAR_URL" /d:sonar.login="$SONAR_TOKEN" /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" /d:sonar.cs.vstest.reportsPaths="**/TestResults/testresults.trx" /d:sonar.exclusions="**/wwwroot/**" /d:sonar.branch.name="$CIRCLE_BRANCH"
+    #                 dotnet restore Dolphin/Dolphin.csproj --source "https://api.nuget.org/v3/index.json" --source "http://quget.rockfin.com/api" --disable-parallel
+    #                 dotnet restore Dolphin.Tests/Dolphin.Tests.csproj --source "https://api.nuget.org/v3/index.json" --source "http://quget.rockfin.com/api" --disable-parallel
+    #                 dotnet build Dolphin/Dolphin.csproj -c Release --no-restore
+    #                 dotnet test Dolphin.Tests/Dolphin.Tests.csproj --configuration release --no-restore --logger "trx;LogFileName=testresults.trx" /p:CollectCoverage=true /p:CoverletOutputFormat=opencover
+    #                 ~/tools/dotnet-sonarscanner end /d:sonar.login="$SONAR_TOKEN"
+
+    # Pushes build to HAL to the configured HAL_APP_ID application
+    publish_build_to_hal:
+        working_directory: '~/project'
+        docker: [ {image: 'qldockerdtr.rockfin.com/circleci/hal-integration:hal-publisher'} ]
+        environment:
+            HAL_APP_ID: 'XXX'   #Fill in HAL application ID
+            HAL_ARTIFACT_PATH: ''  # We pass no artifacts to Hal
+        steps:
+            - *attach_workspace
+            - run: 'publish-build-to-hal'
+            - *persist_hal_build_id_to_workspace
+
+    # Automates HAL deployments so build is pushed automatically
+    deploy_test:
+        <<: *deploy_nonprod_job
+        environment:
+            HAL_TARGETS: "XXXX"  #Fill in HAL deployment target ID for TEST
+
+    deploy_beta:
+        <<: *deploy_nonprod_job
+        environment:
+            HAL_TARGETS: "XXXX"  #Fill in HAL deployment target ID for BETA
+
+workflows:
+    version: 2
+    pipeline:
+        jobs:
+            - build
+            - publish_build_to_hal:
+                requires: [ build ]
+                filters:
+                    branches:
+                        only: [ master, main ]
+            - deploy_test:
+                requires: [ publish_build_to_hal ]
+            - approve_deploy_beta:
+                requires: [ deploy_test ]
+                type: approval
+            - deploy_beta:
+                requires: [ approve_deploy_beta ]

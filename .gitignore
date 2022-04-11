@@ -1,0 +1,22 @@
+.terraform
+*.auto.tfvars
+terraform.tfstate*
+testing/
+/.metadata/
+terraform.tfstate
+.DS_Store
+# Visual Studio (Code) cache folders
+.vs/
+.vscode/
+# User-specific files prior to Visual Studio 2017 
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+# Build output folders
+[Bb]in/
+[Oo]bj/
+# .NET Core
+project.lock.json
+project.fragment.lock.json
